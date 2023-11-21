@@ -1,0 +1,8 @@
+torch
+torch-scatter
+torch-sparse
+torch-cluster
+torch-geometric
+torch-geometric-temporal
+deepsnap
+wget
