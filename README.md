@@ -1,6 +1,6 @@
 ## Overview
 
-SubTree Aggregation + Gru + Merge Graph
+This implementation is the combination of SubTree Aggregation, GRU and Merge Temporal Graph
 
 ## Requirements
 ```
