@@ -173,23 +173,24 @@ class STSMGNN(nn.Module):
 
         Q = Q.view(-1, self.num_heads, self.head_dim).permute(1, 0, 2)
         K = K.view(-1, self.num_heads, self.head_dim).permute(1, 0, 2)
-        V = V.view(-1, self.num_heads, self.head_dim)
+        V = V.view(-1, self.num_heads, self.head_dim).permute(1, 0, 2)
 
-        hidden = V * (self.hopwise[0])
+        hidden = V.permute(1, 0, 2).contiguous() * (self.hopwise[0])
         layerwise = F.softmax(self.headwise, dim=-2)
 
         # H N D x H D N -> H N N
-        sim = torch.matmul(Q, K.transpose(1, 2)) / math.sqrt(self.head_dim)
-        sim = torch.exp(sim)
+        # sim = torch.matmul(Q, K.transpose(1, 2)) / math.sqrt(self.head_dim)
+        attention = torch.matmul(Q, K.permute(0, 2, 1)) / math.sqrt(self.head_dim)
+        adj = to_dense_adj(edge_index, edge_attr=norm, max_num_nodes=Q.shape[1]).squeeze()
         
         for hop in range(self.K):
             
-            sim = self.mpnn(sim, edge_index, norm.view(1, -1, 1))
+            # attention = attention * adj
             
-            H = torch.matmul(sim, V.transpose(1, 0))
-            H = H.permute(1, 0, 2)
-            C = torch.sum(sim.permute(1, 0, 2), dim=-1).unsqueeze(-1) + 10e-6
-            H = H / C
+            attention = torch.softmax(attention, dim=-1)
+
+            H = torch.matmul(attention, V)
+            H = H.permute(1, 0, 2).contiguous()
 
             gamma = self.hopwise[hop + 1] * layerwise[:, hop].unsqueeze(-1)
             hidden = hidden + gamma * H
@@ -198,6 +199,92 @@ class STSMGNN(nn.Module):
         hidden = F.dropout(hidden, p=self.dropout, training=self.training)
         hidden = self.output_layer(hidden)
         return hidden
+
+class MultiheadAttention(nn.Module):
+    def __init__(self, hid_dim, n_heads, dropout, device):
+        super(MultiheadAttention, self).__init__()
+        self.hid_dim = hid_dim
+        self.n_heads = n_heads
+
+        assert hid_dim % n_heads == 0
+
+        self.w_q = nn.Linear(hid_dim, hid_dim, bias=False)
+        self.w_k = nn.Linear(hid_dim, hid_dim, bias=False)
+        self.w_v = nn.Linear(hid_dim, hid_dim, bias=False)
+        
+        self.fc = nn.Linear(hid_dim, hid_dim)
+        self.dropout = nn.Dropout(dropout)
+
+        self.scale = torch.sqrt(torch.FloatTensor([hid_dim/n_heads])).to(device)
+        
+        self.layer_norm = nn.LayerNorm(hid_dim)
+
+
+    def forward(self, query, key, value):
+        Q = self.w_q(query)
+        K = self.w_k(key)
+        V = self.w_v(value)
+
+        Q = Q.view(-1, self.n_heads, self.hid_dim//self.n_heads).permute(1, 0, 2)
+        K = K.view(-1, self.n_heads, self.hid_dim//self.n_heads).permute(1, 0, 2)
+        V = V.view(-1, self.n_heads, self.hid_dim//self.n_heads).permute(1, 0, 2)
+                   
+        attention = torch.matmul(Q, K.permute(0, 2, 1)) / self.scale
+        attention = self.dropout(torch.softmax(attention, dim=-1))
+
+        x = torch.matmul(attention, V)
+        x = x.permute(1, 0, 2).contiguous()
+        x = x.view(-1, self.n_heads * (self.hid_dim//self.n_heads))
+        x = self.fc(x)
+        x = self.layer_norm(x)
+
+        return x
+    
+class TimeEncode(torch.nn.Module):
+    def __init__(self, dimension):
+      super(TimeEncode, self).__init__()
+
+      self.dimension = dimension
+      self.w = torch.nn.Linear(1, dimension)
+
+      self.w.weight = torch.nn.Parameter((torch.from_numpy(1 / 10 ** np.linspace(0, 9, dimension)))
+                                        .float().reshape(dimension, -1))
+      self.w.bias = torch.nn.Parameter(torch.zeros(dimension).float())
+
+      self.w.weight.requires_grad = False
+      self.w.bias.requires_grad = False
+
+      self.transformation = nn.Sequential(
+            nn.Linear(dimension, dimension),
+            nn.ReLU(),
+            nn.Linear(dimension, dimension)
+      )
+
+    def forward(self, t):
+      t = t.float()
+      t = t.unsqueeze(1)
+      output = torch.cos(self.w(t))
+      output = self.transformation(output)
+      return output
+
+class GraphMixerTE(torch.nn.Module):
+    def __init__(self, time_dim):
+        super(GraphMixerTE, self).__init__()
+        self.w = nn.Parameter(torch.tensor([int(np.sqrt(time_dim)) ** (-(i - 1) / int(np.sqrt(time_dim))) for i in range(1, time_dim + 1)]), requires_grad=False)
+        self.transformation = nn.Sequential(
+            nn.Linear(time_dim, time_dim),
+            nn.ReLU(inplace=True),
+            nn.Linear(time_dim, time_dim)
+        )
+
+    def forward(self, ts):
+        ts = ts.float()
+        ts = ts.unsqueeze(1)
+        map_ts = ts * self.w.view(1, -1)
+        harmonic = torch.sin(map_ts)
+        harmonic = self.transformation(harmonic)
+
+        return harmonic
 
 class RelTemporalEncoding(nn.Module):
     def __init__(self, n_hid, max_len=50, dropout=0.0):
@@ -210,7 +297,7 @@ class RelTemporalEncoding(nn.Module):
         emb.weight.data[:, 1::2] = torch.cos(position * div_term) / math.sqrt(n_hid)
         emb.requires_grad = False
         self.emb = emb
-        self.lin = nn.Linear(n_hid, n_hid)
+        self.lin = nn.Linear(n_hid, 64)
 
     def forward(self, t):
         return self.lin(self.emb(t))
@@ -283,7 +370,7 @@ class RolandLayer(nn.Module):
         self.dim_in = dim_in
         self.dim_out = dim_out
 
-        self.layer = pyg.nn.GCNConv(dim_in, dim_out)
+        self.layer = RolandConvLayer(dim_in, dim_out)
 
         self.post_layer = nn.Sequential(nn.BatchNorm1d(dim_out),
                                         nn.PReLU())

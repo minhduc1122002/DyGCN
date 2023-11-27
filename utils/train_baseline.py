@@ -64,9 +64,9 @@ def train_step_baseline(model, optimizer, dataset, device):
         train_loss += loss
         count += 1
 
-    optimizer.zero_grad()
-    train_loss.backward()
-    optimizer.step()
+        optimizer.zero_grad()
+        loss.backward()
+        optimizer.step()
     
     return np.mean(train_ap), np.mean(train_auc)
 

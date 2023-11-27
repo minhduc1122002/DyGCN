@@ -1,7 +1,7 @@
 import torch
 import torch.nn as nn
 import torch_geometric as pyg
-from model.layers import RolandLayer, LinkDecoder, EGCNLayer, MSTAGNN, STGNN, STSMGNN, RelTemporalEncoding
+from model.layers import *
 from torch_geometric.utils import coalesce, dropout_edge
 
 class ROLAND(nn.Module):
@@ -65,7 +65,7 @@ def merge_graphs(edge_index_list, edge_time_list):
     merge_time = torch.cat(edge_time_list, dim=-1)
     merge, merge_time = coalesce(merge, merge_time, reduce='max')
     return merge, merge_time
-    
+
 class Model(nn.Module):
     def __init__(self, dim_in, hidden_dim, dim_out, num_layer, window_size):
         super(Model, self).__init__()
@@ -75,14 +75,18 @@ class Model(nn.Module):
         self.hidden_dim = hidden_dim
         self.dim_out = dim_out
         self.window_size = window_size
-        
+
         self.mlp_transform = nn.Sequential(nn.Linear(self.dim_in, self.hidden_dim),
                                            nn.ReLU())
-        
-        self.edge_time_encode = RelTemporalEncoding(self.hidden_dim, self.window_size)
+
+        if self.window_size != 1:
+            # self.edge_time_encode = RelTemporalEncoding(64, self.window_size)
+            self.edge_time_encode = TimeEncode(self.hidden_dim)
+            # self.edge_time_encode = GraphMixerTE(64)
 
         self.memory_edge_index = []
         self.memory_edge_time = []
+        self.memory_embedding = []
 
         self.layer = STGNN(self.hidden_dim, dropout=0.0, K=5, num_heads=4)
 
@@ -109,19 +113,21 @@ class Model(nn.Module):
     def merge_memory(self):
         merge_graph, merge_time = merge_graphs(self.memory_edge_index, self.memory_edge_time)
         return merge_graph, merge_time
-    
+
     def forward(self, x, edge_index, edge_label_index, edge_feature, previous_state):
 
         x = self.mlp_transform(x)
 
         self.update_memory(edge_index, edge_feature)
-        merge_edge_index, merge_edge_feature = self.merge_memory()
 
-        merge_edge_feature =  (merge_edge_feature - merge_edge_feature.min())
+        if self.window_size != 1:
+            merge_edge_index, merge_edge_feature = self.merge_memory()
+            merge_edge_feature =  (merge_edge_feature - merge_edge_feature.min() + 1)
 
-        merge_edge_feature = self.edge_time_encode(merge_edge_feature)
-
-        x = self.layer(x, merge_edge_index, merge_edge_feature)
+            merge_edge_feature = self.edge_time_encode(merge_edge_feature)
+            x = self.layer(x, merge_edge_index, merge_edge_feature)
+        else:
+            x = self.layer(x, edge_index, None)
 
         x = self.gru(x, previous_state)
         prediction = self.decoder(x, edge_label_index)
