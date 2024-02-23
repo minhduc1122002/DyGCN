@@ -1,8 +1,8 @@
-torch
-torch-scatter
-torch-sparse
-torch-cluster
-torch-geometric
-torch-geometric-temporal
-deepsnap
+torch==2.2.0+cu118
+torch-scatter -f https://data.pyg.org/whl/torch-2.2.0+cu118.html
+torch-sparse -f https://data.pyg.org/whl/torch-2.2.0+cu118.html
+torch-cluster -f https://data.pyg.org/whl/torch-2.2.0+cu118.html
+torch-geometric -f https://data.pyg.org/whl/torch-2.2.0+cu118.html
+numpy
+pandas
 wget

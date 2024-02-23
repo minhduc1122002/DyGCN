@@ -1,10 +1,10 @@
-import math
 import torch
 import torch.optim as optim
 import copy
 import numpy as np
-from tqdm.auto import tqdm
-from utils.loss import compute_loss, compute_roc_auc, compute_ap, compute_accuracy
+
+from utils.loss import compute_loss, compute_roc_auc, compute_ap
+from dataloader.utils import negative_sampling
 
 @torch.no_grad()
 def evaluate_step_roland(model, dataset, task, hidden_state_list, device):
@@ -34,14 +34,9 @@ def evaluate_step_roland(model, dataset, task, hidden_state_list, device):
     loss = compute_loss(prediction, label)
 
     roc_auc = compute_roc_auc(prediction, label)
-    accuracy = compute_accuracy(prediction, label)
     ap = compute_ap(prediction, label)
 
-    # mrr, rck1, rck3, rck10 = report_rank_based_eval(current_snapshot, next_snapshot, hidden_state_list, model, num_neg_per_node=1000)
-
-    # return {'loss': loss.item(), 'mrr': mrr, 'rck10': rck10, 'roc_auc': roc_auc, 'accuracy': accuracy, 'ap': ap}
-
-    return {'loss': loss.item(), 'roc_auc': roc_auc, 'accuracy': accuracy, 'ap': ap}
+    return {'loss': loss.item(), 'roc_auc': roc_auc, 'ap': ap}
 
 @torch.no_grad()
 def average_state_dict(dict1, dict2, weight):
@@ -68,8 +63,14 @@ def train_step_roland(model, optimizer, dataset, task, hidden_state_list, device
     x = current_snapshot.node_feature.to(device)
     edge_index = current_snapshot.edge_index.to(device)
 
-    edge_label_index = next_snapshot.edge_label_index.to(device)
-    label = next_snapshot.edge_label.to(device)
+    # edge_label_index = next_snapshot.edge_label_index.to(device)
+    # label = next_snapshot.edge_label.to(device)
+
+    negative_edge_index = negative_sampling(next_snapshot.edge_index)
+    edge_label_index = torch.cat([next_snapshot.edge_index, negative_edge_index], dim=-1).to(device)
+
+    label = torch.cat([torch.ones(next_snapshot.edge_index.shape[1]),
+                       torch.zeros(negative_edge_index.shape[1])]).to(device)
 
     if hidden_state_list is not None:
         previous_states = [x.detach().clone() for x in hidden_state_list]
@@ -115,7 +116,7 @@ def update_node_states(model, dataset, task, hidden_state_list, device):
 
     return new_hidden_state_list
 
-def train_roland(model, optimizer, dataset, n_epoch, device):
+def train_roland(model, args, optimizer, dataset, n_epoch, device):
     task_range = range(len(dataset.snapshots) - 1)
     test_start, test_end = dataset.get_range_by_split('test')
 
@@ -123,19 +124,21 @@ def train_roland(model, optimizer, dataset, n_epoch, device):
 
     auc_hist = list()
     ap_hist = list()
+    mrr_hist = list()
 
     hidden_state_list = None
 
     for t in task_range:
         test_perf = evaluate_step_roland(model, dataset, (t, t + 1), hidden_state_list, device)
 
-        print('Snapshot: {}, loss: {:.5f}, ap: {:.5f}, roc_auc: {:.5f}'.format(t + 1, test_perf['loss'], test_perf['ap'], test_perf['roc_auc']))
+        print('Snapshot: {}, loss: {:.4f}, ap: {:.4f}, roc_auc: {:.4f}'.format(t + 1, test_perf['loss'], test_perf['ap'],
+                                                                                            test_perf['roc_auc']))
         auc_hist.append(test_perf['roc_auc'])
         ap_hist.append(test_perf['ap'])
 
         del optimizer
 
-        optimizer = optim.Adam(model.parameters(), lr=1e-3, weight_decay=5e-4)
+        optimizer = optim.Adam(model.parameters(), lr=args.learning_rate, weight_decay=args.weight_decay)
 
         best_model = {'val_loss': np.inf, 'train_epoch': 0, 'state': None}
         best_model_unchanged = 0
@@ -153,7 +156,7 @@ def train_roland(model, optimizer, dataset, n_epoch, device):
                 best_model_unchanged += 1
 
             # earyly stopping
-            if best_model_unchanged >= 10:
+            if best_model_unchanged >= 20:
                 break
             else:
                 train_perf = train_step_roland(model, optimizer,  dataset, (t, t + 1), hidden_state_list, device)
@@ -164,11 +167,11 @@ def train_roland(model, optimizer, dataset, n_epoch, device):
         if model_init is None:
             model_init = copy.deepcopy(best_model['state'])
         else:
-            new_weight = 0.5
+            new_weight = 0.7
             model_init = average_state_dict(model_init, best_model['state'], new_weight)
 
         hidden_state_list = update_node_states(model, dataset, (t, t + 1), hidden_state_list, device)
-    
+
     final_auc = np.mean(auc_hist[test_start - 1:])
     final_ap = np.mean(ap_hist[test_start - 1:])
 

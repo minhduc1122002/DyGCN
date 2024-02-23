@@ -7,11 +7,9 @@ import math
 
 import torch
 
-from deepsnap.graph import Graph
-from deepsnap.dataset import GraphDataset
-
-from scipy import sparse as sp
 from torch_geometric.utils import coalesce
+from torch_geometric.data import Data
+from dataloader.utils import negative_sampling
 
 class UCIDataset():
     def __init__(self, url, file_name, interval, train_ratio, val_ratio):
@@ -34,16 +32,20 @@ class UCIDataset():
         self.num_edges = self.graph.edge_index.shape[1]
         self.num_snapshots = len(self.snapshot_list)
 
-        self.snapshots = GraphDataset(
-            self.snapshot_list,
-            task='link_pred',
-            edge_negative_sampling_ratio=1,
-            minimum_node_per_graph=5
-        )
+        self.snapshots = []
+        for snapshot in self.snapshot_list:
+            negative_edge_index = negative_sampling(snapshot.edge_index)
+            snapshot.edge_label_index = torch.cat([snapshot.edge_index,
+                                                   negative_edge_index], dim=-1)
+            snapshot.edge_label = torch.cat([
+                torch.ones(snapshot.edge_index.shape[1]),
+                torch.zeros(negative_edge_index.shape[1])
+            ])
+            self.snapshots.append(snapshot)
 
         print('Total Snapshots: {}, Total Nodes: {}, Total Edges: {}'.format(self.num_snapshots,
                                                                              self.num_nodes, self.num_edges))
-    
+
     def get_range_by_split(self, split):
         total_snapshots = len(self.snapshots)
         if split == 'train':
@@ -84,6 +86,12 @@ class UCIDataset():
         df_trans['SRC'] -= 1
         df_trans['DST'] -= 1
 
+        self.min_dst = min(df_trans['DST'])
+        self.max_dst = max(df_trans['DST'])
+
+        self.min_src = min(df_trans['SRC'])
+        self.max_src = max(df_trans['SRC'])
+
         edge_index = torch.Tensor(df_trans[['SRC', 'DST']].values.transpose()).long()
         num_nodes = torch.max(edge_index) + 1
 
@@ -93,7 +101,7 @@ class UCIDataset():
 
         edge_time = torch.FloatTensor(df_trans['TIMESTAMP'].values)
 
-        self.graph = Graph(node_feature=node_feature,
+        self.graph = Data(node_feature=node_feature,
                            edge_index=edge_index,
                            edge_time=edge_time)
 
@@ -103,7 +111,7 @@ class UCIDataset():
         self.snapshot_list = list()
         for t in groups:
             period_members = (split_criterion == t)
-            g = Graph(node_feature=self.graph.node_feature,
+            g = Data(node_feature=self.graph.node_feature,
                       edge_index=self.graph.edge_index[:, period_members]
                       )
             g.edge_index = coalesce(g.edge_index)
@@ -134,21 +142,18 @@ class UCIDataset():
         for p in periods:
             period_members = period2id[p]
 
-            g = Graph(node_feature=self.graph.node_feature,
+            g = Data(node_feature=self.graph.node_feature,
                       edge_index=self.graph.edge_index[:, period_members],
                       )
 
             g.edge_index = coalesce(g.edge_index)
-
-            # positional_embedding = laplacian_positional_encoding(g, pos_enc_dim=8)
-            g.positional_embedding = torch.zeros(1)
 
             if g.edge_index.shape[1] > 2:
               g.edge_time = torch.full((g.edge_index.shape[1], ), t + 1)
               t = t + 1
               self.snapshot_list.append(g)
 
-class MathOFDataset():
+class SXDataset():
     def __init__(self, url, file_name, interval, train_ratio, val_ratio):
         super().__init__()
         self.url = url
@@ -169,16 +174,20 @@ class MathOFDataset():
         self.num_edges = self.graph.edge_index.shape[1]
         self.num_snapshots = len(self.snapshot_list)
 
-        self.snapshots = GraphDataset(
-            self.snapshot_list,
-            task='link_pred',
-            edge_negative_sampling_ratio=1,
-            minimum_node_per_graph=5
-        )
+        self.snapshots = []
+        for snapshot in self.snapshot_list:
+            negative_edge_index = negative_sampling(snapshot.edge_index)
+            snapshot.edge_label_index = torch.cat([snapshot.edge_index,
+                                                   negative_edge_index], dim=-1)
+            snapshot.edge_label = torch.cat([
+                torch.ones(snapshot.edge_index.shape[1]),
+                torch.zeros(negative_edge_index.shape[1])
+            ])
+            self.snapshots.append(snapshot)
 
         print('Total Snapshots: {}, Total Nodes: {}, Total Edges: {}'.format(self.num_snapshots,
                                                                              self.num_nodes, self.num_edges))
-    
+
     def get_range_by_split(self, split):
         total_snapshots = len(self.snapshots)
         if split == 'train':
@@ -207,10 +216,10 @@ class MathOFDataset():
     def preprocess(self):
         path = './data/{}'.format(self.file_name)
         with gzip.open(path, 'rb') as f_in:
-            with open('./data/sx-mathoverflow.txt', 'wb') as f_out:
+            with open('./data/stack-exchange.txt'.format(self.file_name), 'wb') as f_out:
                 shutil.copyfileobj(f_in, f_out)
 
-        path = './data/{}'.format('sx-mathoverflow.txt')
+        path = './data/{}'.format('stack-exchange.txt')
         df_trans = pd.read_csv(path, sep=' ', header=None)
         df_trans.columns = ['SOURCE', 'TARGET', 'TIMESTAMP']
         df_trans.reset_index(drop=True, inplace=True)
@@ -229,7 +238,7 @@ class MathOFDataset():
 
         edge_time = torch.FloatTensor(df_trans['TIMESTAMP'].values)
 
-        self.graph = Graph(node_feature=node_feature,
+        self.graph = Data(node_feature=node_feature,
                            edge_index=edge_index,
                            edge_time=edge_time)
 
@@ -239,9 +248,10 @@ class MathOFDataset():
         self.snapshot_list = list()
         for t in groups:
             period_members = (split_criterion == t)
-            g = Graph(node_feature=self.graph.node_feature,
+            g = Data(node_feature=self.graph.node_feature,
                       edge_index=self.graph.edge_index[:, period_members]
                       )
+
             g.edge_index = coalesce(g.edge_index)
 
             if g.edge_index.shape[1] > 2:
@@ -270,14 +280,11 @@ class MathOFDataset():
         for p in periods:
             period_members = period2id[p]
 
-            g = Graph(node_feature=self.graph.node_feature,
+            g = Data(node_feature=self.graph.node_feature,
                       edge_index=self.graph.edge_index[:, period_members],
                       )
 
             g.edge_index = coalesce(g.edge_index)
-
-            # positional_embedding = laplacian_positional_encoding(g, pos_enc_dim=8)
-            g.positional_embedding = torch.zeros(1)
 
             if g.edge_index.shape[1] > 2:
               g.edge_time = torch.full((g.edge_index.shape[1], ), t + 1)
@@ -305,12 +312,16 @@ class BitCoinDataset():
         self.num_edges = self.graph.edge_index.shape[1]
         self.num_snapshots = len(self.snapshot_list)
 
-        self.snapshots = GraphDataset(
-            self.snapshot_list,
-            task='link_pred',
-            edge_negative_sampling_ratio=1,
-            minimum_node_per_graph=5
-        )
+        self.snapshots = []
+        for snapshot in self.snapshot_list:
+            negative_edge_index = negative_sampling(snapshot.edge_index)
+            snapshot.edge_label_index = torch.cat([snapshot.edge_index,
+                                                   negative_edge_index], dim=-1)
+            snapshot.edge_label = torch.cat([
+                torch.ones(snapshot.edge_index.shape[1]),
+                torch.zeros(negative_edge_index.shape[1])
+            ])
+            self.snapshots.append(snapshot)
 
         print('Total Snapshots: {}, Total Nodes: {}, Total Edges: {}'.format(self.num_snapshots,
                                                                              self.num_nodes, self.num_edges))
@@ -339,14 +350,14 @@ class BitCoinDataset():
         else:
             raise NotImplementedError('no such split {}'.format(split))
         return begin, end
-    
+
     def preprocess(self):
         path = './data/{}'.format(self.file_name)
         with gzip.open(path, 'rb') as f_in:
-            with open('./data/soc-sign-bitcoinotc.csv', 'wb') as f_out:
+            with open('./data/soc-sign-bitcoin.csv', 'wb') as f_out:
                 shutil.copyfileobj(f_in, f_out)
 
-        path = './data/{}'.format('soc-sign-bitcoinotc.csv')
+        path = './data/{}'.format('soc-sign-bitcoin.csv')
         df_trans = pd.read_csv(path, sep=',', header=None, index_col=None)
 
         df_trans.columns = ['SOURCE', 'TARGET', 'RATING', 'TIME']
@@ -354,8 +365,15 @@ class BitCoinDataset():
         node_indices = np.sort(pd.unique(df_trans[['SOURCE', 'TARGET']].to_numpy().ravel()))
         enc = OrdinalEncoder(categories=[node_indices, node_indices])
         raw_edges = df_trans[['SOURCE', 'TARGET']].values
+
         edge_index = enc.fit_transform(raw_edges).transpose()
         edge_index = torch.LongTensor(edge_index)
+
+        self.min_src = min(edge_index[0]).item()
+        self.max_src = max(edge_index[0]).item()
+
+        self.min_dst = min(edge_index[1]).item()
+        self.max_dst = max(edge_index[1]).item()
 
         num_nodes = len(pd.unique(df_trans[['SOURCE', 'TARGET']].to_numpy().ravel()))
 
@@ -363,7 +381,7 @@ class BitCoinDataset():
 
         edge_time = torch.FloatTensor(df_trans['TIME'].values)
 
-        self.graph = Graph(node_feature=node_feature,
+        self.graph = Data(node_feature=node_feature,
                            edge_index=edge_index,
                            edge_time=edge_time)
 
@@ -373,7 +391,7 @@ class BitCoinDataset():
         self.snapshot_list = list()
         for t in groups:
             period_members = (split_criterion == t)
-            g = Graph(node_feature=self.graph.node_feature,
+            g = Data(node_feature=self.graph.node_feature,
                       edge_index=self.graph.edge_index[:, period_members],
                       edge_time=self.graph.edge_time[period_members])
             if g.edge_index.shape[1] >= 10:
@@ -402,43 +420,42 @@ class BitCoinDataset():
         for p in periods:
             period_members = period2id[p]
 
-            g = Graph(node_feature=self.graph.node_feature,
+            g = Data(node_feature=self.graph.node_feature,
                       edge_index=self.graph.edge_index[:, period_members],
                       )
 
             g.edge_index = coalesce(g.edge_index)
-
-            # positional_embedding = laplacian_positional_encoding(g, pos_enc_dim=3)
-
-            g.positional_embedding = torch.zeros(1)
 
             if g.edge_index.shape[1] >= 10:
               g.edge_time = torch.full((g.edge_index.shape[1], ), t + 1)
               t = t + 1
               self.snapshot_list.append(g)
 
-class DBLPDataset():
+class TechDataset():
     def __init__(self, file_name, interval, train_ratio, val_ratio):
         super().__init__()
         self.file_name = file_name
-        self.time_interval = interval
         self.train_ratio = train_ratio
         self.val_ratio = val_ratio
-
+        self.time_interval = interval
         self.preprocess()
 
         self.make_graph_snapshot()
-        
+
         self.num_nodes = self.graph.node_feature.shape[0]
         self.num_edges = self.graph.edge_index.shape[1]
         self.num_snapshots = len(self.snapshot_list)
 
-        self.snapshots = GraphDataset(
-            self.snapshot_list,
-            task='link_pred',
-            edge_negative_sampling_ratio=1,
-            minimum_node_per_graph=5
-        )
+        self.snapshots = []
+        for snapshot in self.snapshot_list:
+            negative_edge_index = negative_sampling(snapshot.edge_index)
+            snapshot.edge_label_index = torch.cat([snapshot.edge_index,
+                                                   negative_edge_index], dim=-1)
+            snapshot.edge_label = torch.cat([
+                torch.ones(snapshot.edge_index.shape[1]),
+                torch.zeros(negative_edge_index.shape[1])
+            ])
+            self.snapshots.append(snapshot)
 
         print('Total Snapshots: {}, Total Nodes: {}, Total Edges: {}'.format(self.num_snapshots,
                                                                              self.num_nodes, self.num_edges))
@@ -457,24 +474,26 @@ class DBLPDataset():
         else:
             raise NotImplementedError('no such split {}'.format(split))
         return begin, end
-    
+
     def preprocess(self):
-        path = './data/{}'.format(self.file_name)
-        df = pd.read_csv(path)
-        df['u'] -= 1
-        df['i'] -= 1
-        
-        edge_index = torch.Tensor(df[['u', 'i']].values.transpose()).long()  # (2, E)
+        df = pd.read_csv(self.file_name, sep=' ', header=None)
+        df.columns = ['src', 'dst', 'w', 'ts']
+        df.reset_index(drop=True, inplace=True)
+        df['src'] -= 1
+        df['dst'] -= 1
+
+        edge_index = torch.Tensor(df[['src', 'dst']].values.transpose()).long()  # (2, E)
         num_nodes = torch.max(edge_index) + 1
 
         node_feature = torch.rand(num_nodes, 64)
         edge_time = torch.FloatTensor(df['ts'].values)
 
-        self.graph = Graph(
+        self.graph = Data(
             node_feature=node_feature,
             edge_index=edge_index,
             edge_time=edge_time,
         )
+        print(self.graph)
 
     def make_graph_snapshot(self):
         t = self.graph.edge_time.numpy().astype(np.int64)
@@ -499,14 +518,13 @@ class DBLPDataset():
         for p in periods:
             period_members = period2id[p]
 
-            g = Graph(node_feature=self.graph.node_feature,
+            g = Data(node_feature=self.graph.node_feature,
                       edge_index=self.graph.edge_index[:, period_members],
                       )
 
             g.edge_index = coalesce(g.edge_index)
 
-            # positional_embedding = laplacian_positional_encoding(g, pos_enc_dim=3)
-            g.positional_embedding = torch.zeros(1)
-            g.edge_time = torch.full((g.edge_index.shape[1], ), t + 1)
-            t = t + 1
-            self.snapshot_list.append(g)
+            if g.edge_index.shape[1] > 2:
+              g.edge_time = torch.full((g.edge_index.shape[1], ), t + 1)
+              t = t + 1
+              self.snapshot_list.append(g)
