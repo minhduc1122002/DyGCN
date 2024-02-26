@@ -168,7 +168,7 @@ def train(model, optimizer, dataset, n_epoch, patience, device):
 
     model.load_state_dict(best_model)
 
-    final_metric = evaluate_step(model, dataset, best_state, val_memory_edge_index, val_memory_edge_time, 'test', device, compute_mrr=False)
+    final_metric = evaluate_step(model, dataset, best_state, val_memory_edge_index, val_memory_edge_time, 'test', device)
 
     print('Final Test Results: roc_auc: {:.4f}, ap: {:.4f}'.format(final_metric['auc'], final_metric['ap']))
 
