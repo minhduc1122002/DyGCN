@@ -172,7 +172,7 @@ def train_baseline(model, args, optimizer, dataset, n_epoch, device):
             best_model_unchanged += 1
 
     model.load_state_dict(best_model)
-    test_metric, _, _, _ = evaluate_step_baseline(model, dataset, 'test', device, best_H, best_C, best_history)
+    test_metric, _, _, _ = evaluate_step_baseline(model, args, dataset, 'test', device, best_H, best_C, best_history)
 
     print('Final Test Results: roc_auc: {:.4f}, ap: {:.4f}'.format(test_metric['auc'], test_metric['ap']))
     return test_metric['auc'], test_metric['ap']
