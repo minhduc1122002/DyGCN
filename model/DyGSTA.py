@@ -10,7 +10,7 @@ from torch_geometric.utils import coalesce
 from model.layers import LinkDecoder, MPNN, MPNN2, TimeEncode, Sampling
 
 class DyGSTA(nn.Module):
-    def __init__(self, dim_in, hidden_dim, dim_out, num_hop, window_size,
+    def __init__(self, dim_in, hidden_dim, dim_out, num_hop, num_heads, window_size,
                  ratio=0.8, time_encode=True, recurrent=True, device='cuda'):
         super(DyGSTA, self).__init__()
         
@@ -22,6 +22,7 @@ class DyGSTA(nn.Module):
         self.num_hop = num_hop
         self.time_encode = time_encode
         self.recurrent = recurrent
+        self.num_heads = num_heads
         
         self.device = device
 
@@ -41,7 +42,7 @@ class DyGSTA(nn.Module):
         self.memory_edge_time = []
         self.memory_embedding = []
 
-        self.layer = MSTAGNN(self.hidden_dim, dropout=0.0, K=self.num_hop, num_heads=4)
+        self.layer = MSTAGNN(self.hidden_dim, dropout=0.0, K=self.num_hop, num_heads=self.num_heads)
         
         if self.recurrent:
             self.gru = nn.GRUCell(self.hidden_dim, self.hidden_dim)

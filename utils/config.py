@@ -9,7 +9,7 @@ def get_args():
     parser.add_argument('--dataset_name', type=str, help='dataset to be used', default='uci',
                         choices=['uci', 'bc-otc', 'tech', 'mathof', 'askubuntu', 'superuser'])
 
-    parser.add_argument('--dataset_interval', help='time interval to spilt data', default='W',
+    parser.add_argument('--dataset_interval', help='time interval to spilt data', default='D',
                         choices=['W', 'D', 'M'])
 
     parser.add_argument('--train_ratio', type=float, default=0.7, help='ratio of validation set')
@@ -35,7 +35,7 @@ def get_args():
     parser.add_argument('--hidden_dim', type=int, default=64, help='dimension of hidden embedding')
     parser.add_argument('--dropout', type=float, default=0.1, help='dropout rate')
 
-    parser.add_argument('--learning_rate', type=float, default=1e-3, help='learning rate')
+    parser.add_argument('--learning_rate', type=float, default=5e-4, help='learning rate')
     parser.add_argument('--num_epochs', type=int, default=50, help='number of epochs')
     parser.add_argument('--weight_decay', type=float, default=0, help='weight decay')
     parser.add_argument('--patience', type=int, default=20, help='patience for early stopping')
@@ -78,7 +78,7 @@ def get_dataset(args):
         dataset = SXDataset(URL, FILE_NAME, args.dataset_interval, args.train_ratio, args.val_ratio)
 
     elif args.dataset_name == 'tech':
-        FILE_NAME = '/data/tech-as-topology.txt'
+        FILE_NAME = 'data/tech-as-topology.txt'
         dataset = TechDataset(FILE_NAME, args.dataset_interval, args.train_ratio, args.val_ratio)
     else:
         raise NotImplementedError('No such dataset: {}'.format(args.dataset_name))
