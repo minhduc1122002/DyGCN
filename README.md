@@ -18,15 +18,3 @@ python main.py --dataset_name uci --model_name DyGSTA --window_size 5 --num_runs
 ```
 python main.py --dataset_name uci --model_name ROLAND --num_runs 3
 ```
-
-* Example of training [EvolveGCN](https://arxiv.org/pdf/1902.10191.pdf) on UCI dataset:
-```
-python main.py --dataset_name uci --model_name EvolveGCN --rnn LSTM --num_runs 3
-```
-
-## Parameter Study
-
-* Number of heads experiments on Tech
-```
-python main.py --dataset_name tech --dataset_interval D --model_name DyGSTA --window_size 7 --num_heads 2 --num_runs 3
-```
