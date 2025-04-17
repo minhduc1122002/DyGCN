@@ -59,7 +59,7 @@ if __name__ == "__main__":
             model = WinGNN(dim_in=args.input_dim, hidden_dim=args.hidden_dim, num_layer=args.num_layers)
             
         elif args.model_name == 'DyGCN':
-            model = DyGCN(dim_in=args.input_dim, hidden_dim=args.hidden_dim, dim_out=1, num_heads=args.num_heads, num_hop=args.num_hop,
+            model = DyGCN(dim_in=args.input_dim, hidden_dim=args.hidden_dim, dim_out=1, num_heads=args.num_heads, n_layers=args.n_layers,
                           window_size=args.window_size, recurrent=args.recurrent, time_encode=args.time_encode, device=args.device)
 
         model.to(args.device)

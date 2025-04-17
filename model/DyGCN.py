@@ -11,7 +11,7 @@ import torch_geometric as pyg
 from model.layers import LinkDecoder, MPNN, MPNN2, TimeEncode, Sampling
 
 class DyGCN(nn.Module):
-    def __init__(self, dim_in, hidden_dim, dim_out, num_hop, num_heads, window_size,
+    def __init__(self, dim_in, hidden_dim, dim_out, n_layers, num_heads, window_size,
                  ratio=0.8, time_encode=True, recurrent=True, device='cuda'):
         super(DyGCN, self).__init__()
         
@@ -20,7 +20,7 @@ class DyGCN(nn.Module):
         self.dim_out = dim_out
         self.window_size = window_size
         self.ratio = ratio
-        self.num_hop = num_hop
+        self.n_layers = n_layers
         self.time_encode = time_encode
         self.recurrent = recurrent
         self.num_heads = num_heads
@@ -43,9 +43,9 @@ class DyGCN(nn.Module):
         self.memory_edge_time = []
         self.memory_embedding = []
 
-        self.layer1 = pyg.nn.conv.GCNConv(self.hidden_dim, self.hidden_dim)
+        self.layer = nn.ModuleList([pyg.nn.conv.GCNConv(self.hidden_dim, self.hidden_dim)
+                                    for i in range(self.n_layers)])
         self.act = nn.ReLU()
-        self.layer2 = pyg.nn.conv.GCNConv(self.hidden_dim, self.hidden_dim)
         
         if self.recurrent:
             self.gru = nn.GRUCell(self.hidden_dim, self.hidden_dim)
@@ -117,13 +117,20 @@ class DyGCN(nn.Module):
             
             if self.time_encode:
                 sampling_edge_feature = torch.gather(merge_edge_feature, dim=0, index=keep.unsqueeze(dim=1).repeat(1, merge_edge_feature.shape[1]))
-                x = self.layer1(x, sampling_edge_index, sampling_edge_weight)
-                x = self.act(x)
-                x = self.layer2(x, sampling_edge_index, sampling_edge_weight)
+                for i, layer in enumerate(self.layer):
+                    x = layer(x, sampling_edge_index, sampling_edge_weight)
+                    if i != self.n_layers - 1:
+                        x = self.act(x)
             else:
-                x = self.layer1(x, sampling_edge_index, None, sampling_edge_weight)
+                for i, layer in enumerate(self.layer):
+                    x = layer(x, sampling_edge_index, sampling_edge_weight)
+                    if i != self.n_layers - 1:
+                        x = self.act(x)
         else:
-            x = self.layer1(x, edge_index, None, 1)
+            for i, layer in enumerate(self.layer):
+                    x = layer(x, edge_index)
+                    if i != self.n_layers - 1:
+                        x = self.act(x)
         
         if self.recurrent:
             x = self.gru(x, previous_state)

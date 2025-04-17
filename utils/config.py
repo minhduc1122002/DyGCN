@@ -24,7 +24,7 @@ def get_args():
     parser.add_argument('--num_heads', type=int, default=4, help='number of heads used in attention layer')
     parser.add_argument('--window_size', type=int, default=5, help='merge window in subtree model')
     parser.add_argument('--sampling_ratio', type=float, default=0.8, help='sampling ratio')
-    parser.add_argument('--num_hop', type=int, default=5, help='number of hop')
+    parser.add_argument('--n_layers', type=int, default=2, help='number of hop')
     parser.add_argument('--recurrent', action='store_true', default=True, help='use recurrent layer')
     parser.add_argument('--time_encode', action='store_true', default=True, help='use time encode')
 
