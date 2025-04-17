@@ -6,13 +6,14 @@ import torch.nn.functional as F
 
 from torch_geometric.utils import degree
 from torch_geometric.utils import coalesce
+import torch_geometric as pyg
 
 from model.layers import LinkDecoder, MPNN, MPNN2, TimeEncode, Sampling
 
-class DyGSTA(nn.Module):
+class DyGCN(nn.Module):
     def __init__(self, dim_in, hidden_dim, dim_out, num_hop, num_heads, window_size,
                  ratio=0.8, time_encode=True, recurrent=True, device='cuda'):
-        super(DyGSTA, self).__init__()
+        super(DyGCN, self).__init__()
         
         self.dim_in = dim_in
         self.hidden_dim = hidden_dim
@@ -42,7 +43,9 @@ class DyGSTA(nn.Module):
         self.memory_edge_time = []
         self.memory_embedding = []
 
-        self.layer = MSTAGNN(self.hidden_dim, dropout=0.0, K=self.num_hop, num_heads=self.num_heads)
+        self.layer1 = pyg.nn.conv.GCNConv(self.hidden_dim, self.hidden_dim)
+        self.act = nn.ReLU()
+        self.layer2 = pyg.nn.conv.GCNConv(self.hidden_dim, self.hidden_dim)
         
         if self.recurrent:
             self.gru = nn.GRUCell(self.hidden_dim, self.hidden_dim)
@@ -53,7 +56,6 @@ class DyGSTA(nn.Module):
         if len(self.memory_edge_index) >= self.window_size:
             self.memory_edge_index.pop(0)
             self.memory_edge_time.pop(0)
-            del self.memory_edge_index[0], self.memory_edge_time[0]
 
         self.memory_edge_index.append(edge_index.clone().detach().cpu())
         self.memory_edge_time.append(edge_time.clone().detach().cpu())
@@ -97,7 +99,7 @@ class DyGSTA(nn.Module):
                 temperature = 1.0
                 bias = 0.0 + 0.0001  # If bias is 0, we run into problems
                 eps = (bias - (1 - bias)) * torch.rand(edge_logits.size()) + (1 - bias)
-                gate_inputs = torch.log(eps) - torch.log(1 - eps)
+                gate_inputs = torch.log(eps + 1e-15) - torch.log(1 - eps + 1e-15)
                 gate_inputs = gate_inputs.to(self.device)
                 gate_inputs = (gate_inputs + edge_logits) / temperature
             else:
@@ -115,11 +117,13 @@ class DyGSTA(nn.Module):
             
             if self.time_encode:
                 sampling_edge_feature = torch.gather(merge_edge_feature, dim=0, index=keep.unsqueeze(dim=1).repeat(1, merge_edge_feature.shape[1]))
-                x = self.layer(x, sampling_edge_index, sampling_edge_feature, sampling_edge_weight)
+                x = self.layer1(x, sampling_edge_index, sampling_edge_weight)
+                x = self.act(x)
+                x = self.layer2(x, sampling_edge_index, sampling_edge_weight)
             else:
-                x = self.layer(x, sampling_edge_index, None, sampling_edge_weight)
+                x = self.layer1(x, sampling_edge_index, None, sampling_edge_weight)
         else:
-            x = self.layer(x, edge_index, None, 1)
+            x = self.layer1(x, edge_index, None, 1)
         
         if self.recurrent:
             x = self.gru(x, previous_state)

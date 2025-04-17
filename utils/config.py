@@ -17,10 +17,10 @@ def get_args():
     parser.add_argument('--input_dim', type=int, default=64, help='randomly generate initial embedding')
 
     parser.add_argument('--model_name', type=str, default='DyGSTA', help='name of the model',
-                        choices=['DyGSTA', 'EvolveGCN', 'ROLAND', 'DySAT', 'GCRN', 'TGCN', 'WinGNN'])
+                        choices=['DyGCN', 'EvolveGCN', 'ROLAND', 'DySAT', 'GCRN', 'TGCN', 'WinGNN'])
     parser.add_argument('--gpu', type=int, default=0, help='number of gpu to use')
 
-    # DyGSTA
+    # DyGCN
     parser.add_argument('--num_heads', type=int, default=4, help='number of heads used in attention layer')
     parser.add_argument('--window_size', type=int, default=5, help='merge window in subtree model')
     parser.add_argument('--sampling_ratio', type=float, default=0.8, help='sampling ratio')
